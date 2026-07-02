@@ -48,3 +48,8 @@ ignition/deployments/
 
 # logs
 *.log
+
+.agents/
+.claude
+AGENTS.md
+CLAUDE.md
