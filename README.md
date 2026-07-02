@@ -195,7 +195,7 @@ The application visualizes every stage of a real estate transaction:
 
 # 👩‍💻 Author
 
-**Kristina Maykushina**
+**Kristina Miakushina**
 
 2026
 
