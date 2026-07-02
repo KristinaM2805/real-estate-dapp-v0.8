@@ -197,11 +197,7 @@ The application visualizes every stage of a real estate transaction:
 
 **Kristina Maykushina**
 
-Graduation Project
-
-Belarusian State University of Informatics and Radioelectronics (BSUIR)
-
-2025
+2026
 
 ---
 
