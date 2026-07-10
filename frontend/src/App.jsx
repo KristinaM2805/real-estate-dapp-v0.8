@@ -5,8 +5,6 @@ import "./App.css";
 import {
   MARKET_ADDRESS,
   MARKET_ABI,
-  BUYER,
-  SELLER,
 } from "./contractConfig";
 
 import AnimatedScene from "./AnimatedScene";
@@ -30,6 +28,10 @@ function shortAddr(a) {
   return `${a.slice(0, 6)}...${a.slice(-4)}`;
 }
 function normalize(a) { return a?.toLowerCase(); }
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+function isZeroAddress(a) {
+  return !a || normalize(a) === normalize(ZERO_ADDRESS);
+}
 function fmtTime(v) {
   if (!v) return "—";
   const n = Number(v);
@@ -145,7 +147,7 @@ export default function App() {
   const [deal, setDeal] = useState(null);
   const [dealId, setDealId] = useState(null);
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("Подключи MetaMask к сети Hardhat Local");
+  const [message, setMessage] = useState("Подключи MetaMask к локальной сети Hardhat");
   const [mmStatus, setMmStatus] = useState("idle");
   const [animPhase, setAnimPhase] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -160,8 +162,11 @@ export default function App() {
   const pollRef = useRef(null);
 
   const stage = deal?.stage ?? 0;
-  const isBuyer = normalize(account) === normalize(BUYER);
-  const isSeller = normalize(account) === normalize(SELLER);
+  const hasBuyer = deal?.buyer && !isZeroAddress(deal.buyer);
+  const isSeller = Boolean(account && deal?.seller && normalize(account) === normalize(deal.seller));
+  const isBuyer = Boolean(account && hasBuyer && normalize(account) === normalize(deal.buyer));
+  const canJoinAsBuyer = Boolean(account && deal && !isSeller && !hasBuyer && stage === 2);
+  const isDealCreator = isSeller;
   const isCompleted = stage === 7;
   const isCancelled = stage === 8;
 
@@ -173,13 +178,14 @@ export default function App() {
 
   const role = useMemo(() => {
     if (!account) return "Не подключён";
-    if (isBuyer) return "Покупатель";
     if (isSeller) return "Продавец";
-    return "Неизвестный";
-  }, [account, isBuyer, isSeller]);
+    if (isBuyer) return "Покупатель";
+    if (canJoinAsBuyer) return "Покупатель / может присоединиться";
+    return "Подключённый пользователь";
+  }, [account, isSeller, isBuyer, canJoinAsBuyer]);
 
   // Для canvas-сцены передаём реальный stage контракта, иначе действия отображаются с задержкой.
-  const visualStage = stage;
+ const visualStage = isCancelled ? 0 : stage;
   const certLocation = isCompleted ? "buyer" : isCancelled ? "seller" : stage >= 2 ? "escrow" : "seller";
   const moneyLocation = isCompleted ? "seller" : isCancelled ? "buyer" : stage >= 5 ? "escrow" : "buyer";
 
@@ -202,6 +208,46 @@ export default function App() {
         sellerFullName: parties[0], buyerFullName: parties[1],
       });
     } catch (e) { console.error("loadDeal:", e); }
+  }
+
+
+  async function loadLastDealForAddress(c, address) {
+    if (!c || !address) return false;
+
+    try {
+      const count = Number(await c.getDealCount());
+      let lastMatch = null;
+
+      for (let i = 0; i < count; i++) {
+        try {
+          const main = await c.getDealMain(i);
+          const seller = main[1];
+          const buyer = main[2];
+
+          const isAddressSeller = normalize(seller) === normalize(address);
+          const isAddressBuyer = !isZeroAddress(buyer) && normalize(buyer) === normalize(address);
+
+          if (isAddressSeller || isAddressBuyer) {
+            lastMatch = i;
+          }
+        } catch (e) {
+          console.warn(`Не удалось прочитать сделку #${i}:`, e);
+        }
+      }
+
+      if (lastMatch !== null) {
+        setDealId(lastMatch);
+        await loadDeal(c, lastMatch);
+        setShowCreateForm(false);
+        setMessage(`Загружена сделка #${lastMatch}.`);
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      console.warn("Не удалось найти сделки аккаунта:", e);
+      return false;
+    }
   }
 
   // Poll while oracle is working
@@ -228,21 +274,14 @@ export default function App() {
     try {
       const { c, address } = await getFresh();
       setMessage("Кошелёк подключён!");
-      try {
-        const addr = normalize(address) === normalize(SELLER) ? address : BUYER;
-        const ids = normalize(address) === normalize(SELLER)
-          ? await c.getSellerDeals(address)
-          : await c.getBuyerDeals(address);
-        if (ids.length > 0) {
-          const lastId = Number(ids[ids.length - 1]);
-          setDealId(lastId);
-          await loadDeal(c, lastId);
-          setMessage(`Загружена сделка #${lastId}.`);
-        } else {
-          setMessage("Активных сделок нет.");
-          if (normalize(address) === normalize(SELLER)) setShowCreateForm(true);
-        }
-      } catch { setMessage("Кошелёк подключён. Введите ID сделки."); }
+
+      const found = await loadLastDealForAddress(c, address);
+      if (!found) {
+        setDeal(null);
+        setDealId(null);
+        setShowCreateForm(true);
+        setMessage("Кошелёк подключён. Сделок для этого аккаунта пока нет — можно создать новую или открыть сделку по ID.");
+      }
     } catch (e) {
       setMessage(e?.reason || e?.shortMessage || e?.message || "Ошибка");
     }
@@ -331,10 +370,18 @@ export default function App() {
     : null;
 
   useEffect(() => {
-    if (isCompleted) {
-      setMessage("✅ Сделка завершена: право собственности переписано, средства переведены продавцу, покупатель получил ключи.");
+  if (isCompleted) {
+    setMessage("✅ Сделка завершена: право собственности переписано, средства переведены продавцу, покупатель получил ключи.");
+  }
+
+  if (isCancelled) {
+    if (deal?.lastOracleError) {
+      setMessage(`❌ Сделка отменена: ${deal.lastOracleError}`);
+    } else {
+      setMessage("❌ Сделка отменена.");
     }
-  }, [isCompleted]);
+  }
+}, [isCompleted, isCancelled, deal?.lastOracleError]);
 
   return (
     <main className="page">
@@ -392,8 +439,8 @@ export default function App() {
 
       <aside className="controls controls--side">
 
-        {/* Seller — create deal */}
-        {isSeller && !deal && (
+        {/* Create deal — any connected account can become seller */}
+        {account && !deal && (
           <>
             <button className="action-btn action-btn--blue" style={{ gridColumn: "1/-1" }}
               disabled={pending} onClick={() => setShowCreateForm(v => !v)}>
@@ -424,8 +471,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Buyer — enter deal id if not loaded */}
-        {isBuyer && !deal && contract && (
+        {/* Open deal by ID */}
+        {account && !deal && contract && (
           <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
             <label>ID сделки (спросить у продавца)</label>
             <input type="number" placeholder="0"
@@ -433,8 +480,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Buyer — submit data, stage 2 */}
-        {isBuyer && deal && stage === 2 && (
+        {/* Buyer — submit data, stage 2. If buyer is not assigned yet, any non-seller account can join. */}
+        {(isBuyer || canJoinAsBuyer) && deal && stage === 2 && (
           <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
             <label>ФИО покупателя</label>
             <input value={buyerName} onChange={e => setBuyerName(e.target.value)} placeholder="Kristina Maykushina"/>
@@ -511,7 +558,7 @@ export default function App() {
           <div className="grid">
             <p><span>Цена</span>{priceEth} ETH</p>
             <p><span>Продавец</span>{shortAddr(deal.seller)}</p>
-            <p><span>Покупатель</span>{deal.buyer && deal.buyer !== "0x0000000000000000000000000000000000000000" ? shortAddr(deal.buyer) : "не назначен"}</p>
+            <p><span>Покупатель</span>{!isZeroAddress(deal.buyer) ? shortAddr(deal.buyer) : "не назначен"}</p>
             <p><span>Этап</span>{STAGES[stage]}</p>
             <p><span>ФИО продавца</span>{deal.sellerFullName || "—"}</p>
             <p><span>ФИО покупателя</span>{deal.buyerFullName || "—"}</p>

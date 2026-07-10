@@ -14,7 +14,7 @@ const RealEstateMarketModule = buildModule("RealEstateMarketModule", (m) => {
   // "Fulfiller: 0x67Cc5956C1886260CB2e77c160bB9daF75d24123"
   const fulfiller = m.getParameter(
     "fulfiller",
-    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    "0x89e4c94C93cC09F9A977CfcDD2D07F1f4Cd6f76B"
   );
 
   const oracle = m.contract("PropertyOracle", [fulfiller]);
