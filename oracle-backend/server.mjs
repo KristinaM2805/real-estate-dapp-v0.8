@@ -64,7 +64,7 @@ const MOCK_REGISTRY = {
     registryId: "REG-2026-000001",
   },
   "77:02:0001234:5678": {
-    ownerAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", 
+    ownerAddress: "0x8Ba321cCB99c2d01C71A002B5D605646Ec18fE4C", 
     ownerName: "Anna Sidorova",
     registryId: "REG-2026-000002",
   },
