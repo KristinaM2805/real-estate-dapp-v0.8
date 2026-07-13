@@ -97,7 +97,13 @@ const processed = new Set();
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
-let lastProcessedBlock = await provider.getBlockNumber();
+const currentBlock = await provider.getBlockNumber();
+
+let lastProcessedBlock = process.env.START_BLOCK
+  ? Number(process.env.START_BLOCK)
+  : currentBlock;
+
+console.log("Start polling from block:", lastProcessedBlock);
 
 async function processOracleLogs() {
   try {
