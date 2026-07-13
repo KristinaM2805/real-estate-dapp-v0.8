@@ -271,19 +271,20 @@ export default function App() {
   }
 
   async function connectWallet() {
-    if (ids.length > 0) {
-  const lastId = Number(ids[ids.length - 1]);
-  setDealId(lastId);
-  await loadDeal(c, lastId);
-  setMessage(`Загружена последняя сделка #${lastId}. Если она отменена, создайте новую сделку.`);
-  setShowCreateForm(true);
-} else {
-  setDeal(null);
-  setDealId(null);
-  setMessage("Активных сделок нет. Можно создать новую сделку.");
-  setShowCreateForm(true);
-}
+  try {
+    const { c, address } = await getFresh();
+
+    setDeal(null);
+    setDealId(null);
+    setShowCreateForm(true);
+
+    setMessage(
+      `Кошелёк подключён: ${shortAddr(address)}. Можно создать новую сделку или загрузить существующую по ID.`
+    );
+  } catch (e) {
+    setMessage(e?.reason || e?.shortMessage || e?.message || "Ошибка");
   }
+}
 
   const closeMm = useCallback(() => { clearTimeout(mmTimer.current); setMmStatus("idle"); }, []);
 
@@ -436,6 +437,25 @@ export default function App() {
         </div>
 
       <aside className="controls controls--side">
+        {account && contract && (
+  <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
+    <label>ID сделки</label>
+    <input
+      type="number"
+      placeholder="Введите ID сделки"
+      onChange={e => {
+        const value = e.target.value;
+        if (value === "") return;
+
+        const id = Number(value);
+        if (!Number.isNaN(id)) {
+          setDealId(id);
+          loadDeal(contract, id);
+        }
+      }}
+    />
+  </div>
+)}
 
         {/* Create deal — any connected account can become seller */}
         {account && !deal && (
@@ -453,22 +473,28 @@ export default function App() {
         )}
 
         {/* Seller — submit data, stage 0 */}
-        {isSeller && deal && stage === 0 && (
-          <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
-            <label>ФИО продавца</label>
-            <input value={sellerName} onChange={e => setSellerName(e.target.value)} placeholder="Ivan Petrov"/>
-            <label style={{ marginTop: 10 }}>Хеш паспорта</label>
-            <input value={sellerPassport} onChange={e => setSellerPassport(e.target.value)} placeholder="hash_..."/>
-            <button className="action-btn action-btn--orange" disabled={pending} style={{ marginTop: 12, width: "100%" }}
-              onClick={() => runTx(c => c.submitSellerData(dealId, sellerName, sellerPassport),
-                "✍️ Данные продавца отправлены. Оракул проверяет право собственности в реестре...",
-                "Ожидаем ответ оракула...")}>
-              <span className="action-btn__num">1</span>
-              <span className="action-btn__text"><strong>Подать данные продавца</strong><small>Оракул проверит в реестре</small></span>
-            </button>
-          </div>
-        )}
+       {account && (
+  <>
+    <button
+      className="action-btn action-btn--blue"
+      style={{ gridColumn: "1/-1" }}
+      disabled={pending}
+      onClick={() => setShowCreateForm(v => !v)}
+    >
+      <span className="action-btn__num">✦</span>
+      <span className="action-btn__text">
+        <strong>{showCreateForm ? "Скрыть форму" : "Создать новую сделку"}</strong>
+        <small>Задать параметры объекта и цену</small>
+      </span>
+    </button>
 
+    {showCreateForm && (
+      <div style={{ gridColumn: "1/-1" }}>
+        <CreateDealForm onSubmit={handleCreateDeal} disabled={pending} />
+      </div>
+    )}
+  </>
+)}
         {/* Open deal by ID */}
         {account && !deal && contract && (
           <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
