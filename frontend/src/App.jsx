@@ -147,7 +147,7 @@ export default function App() {
   const [deal, setDeal] = useState(null);
   const [dealId, setDealId] = useState(null);
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("Подключи MetaMask к локальной сети Hardhat");
+  const [message, setMessage] = useState("Подключи MetaMask к сети Sepolia");
   const [mmStatus, setMmStatus] = useState("idle");
   const [animPhase, setAnimPhase] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -272,7 +272,7 @@ export default function App() {
 
   async function connectWallet() {
   try {
-    const { c, address } = await getFresh();
+    const { address } = await getFresh();
 
     setDeal(null);
     setDealId(null);
@@ -437,70 +437,103 @@ export default function App() {
         </div>
 
       <aside className="controls controls--side">
-        {account && contract && (
-  <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
-    <label>ID сделки</label>
-    <input
-      type="number"
-      placeholder="Введите ID сделки"
-      onChange={e => {
-        const value = e.target.value;
-        if (value === "") return;
 
-        const id = Number(value);
-        if (!Number.isNaN(id)) {
-          setDealId(id);
-          loadDeal(contract, id);
-        }
-      }}
-    />
-  </div>
-)}
-
-        {/* Create deal — any connected account can become seller */}
-        {account && !deal && (
+        {/* Create new deal — always available for connected wallet */}
+        {account && (
           <>
-            <button className="action-btn action-btn--blue" style={{ gridColumn: "1/-1" }}
-              disabled={pending} onClick={() => setShowCreateForm(v => !v)}>
+            <button
+              className="action-btn action-btn--blue"
+              style={{ gridColumn: "1/-1" }}
+              disabled={pending}
+              onClick={() => {
+                setDeal(null);
+                setDealId(null);
+                setShowCreateForm(v => !v);
+                setMessage("Создание новой сделки. Заполните параметры объекта.");
+              }}
+            >
               <span className="action-btn__num">✦</span>
               <span className="action-btn__text">
-                <strong>{showCreateForm ? "Скрыть форму" : "Создать сделку"}</strong>
-                <small>Задать параметры объекта и цену</small>
+                <strong>{showCreateForm ? "Скрыть форму" : "Создать новую сделку"}</strong>
+                <small>Новая сделка от текущего MetaMask-аккаунта</small>
               </span>
             </button>
-            {showCreateForm && <div style={{ gridColumn: "1/-1" }}><CreateDealForm onSubmit={handleCreateDeal} disabled={pending}/></div>}
+
+            {showCreateForm && (
+              <div style={{ gridColumn: "1/-1" }}>
+                <CreateDealForm onSubmit={handleCreateDeal} disabled={pending} />
+              </div>
+            )}
           </>
         )}
 
-        {/* Seller — submit data, stage 0 */}
-       {account && (
-  <>
-    <button
-      className="action-btn action-btn--blue"
-      style={{ gridColumn: "1/-1" }}
-      disabled={pending}
-      onClick={() => setShowCreateForm(v => !v)}
-    >
-      <span className="action-btn__num">✦</span>
-      <span className="action-btn__text">
-        <strong>{showCreateForm ? "Скрыть форму" : "Создать новую сделку"}</strong>
-        <small>Задать параметры объекта и цену</small>
-      </span>
-    </button>
-
-    {showCreateForm && (
-      <div style={{ gridColumn: "1/-1" }}>
-        <CreateDealForm onSubmit={handleCreateDeal} disabled={pending} />
-      </div>
-    )}
-  </>
-)}
-        {/* Open deal by ID */}
-        {account && !deal && contract && (
+        {/* Load existing deal by ID */}
+        {account && contract && (
           <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
-            <label>ID сделки (спросить у продавца)</label>
-            <input type="number" placeholder="0"
-              onChange={e => { const id = Number(e.target.value); if (!isNaN(id) && e.target.value !== "") { setDealId(id); loadDeal(contract, id); }}}/>
+            <label>ID существующей сделки</label>
+            <input
+              type="number"
+              placeholder="Введите ID сделки"
+              onChange={e => {
+                const value = e.target.value;
+                if (value === "") return;
+
+                const id = Number(value);
+                if (!Number.isNaN(id)) {
+                  setShowCreateForm(false);
+                  setDealId(id);
+                  loadDeal(contract, id);
+                  setMessage(`Загружаем сделку #${id}...`);
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {/* Clear current loaded deal from UI only */}
+        {deal && (
+          <button
+            className="action-btn action-btn--purple"
+            style={{ gridColumn: "1/-1" }}
+            disabled={pending}
+            onClick={() => {
+              setDeal(null);
+              setDealId(null);
+              setShowCreateForm(true);
+              setMessage("Текущая сделка сброшена в интерфейсе. Можно создать новую сделку.");
+            }}
+          >
+            <span className="action-btn__num">↺</span>
+            <span className="action-btn__text">
+              <strong>Сбросить текущую сделку</strong>
+              <small>Не влияет на блокчейн, только очищает экран</small>
+            </span>
+          </button>
+        )}
+
+        {/* Seller — submit data, stage 0 */}
+        {isSeller && deal && stage === 0 && (
+          <div className="nameInputBox" style={{ gridColumn: "1/-1" }}>
+            <label>ФИО продавца</label>
+            <input value={sellerName} onChange={e => setSellerName(e.target.value)} placeholder="Ivan Petrov"/>
+            <label style={{ marginTop: 10 }}>Хеш паспорта</label>
+            <input value={sellerPassport} onChange={e => setSellerPassport(e.target.value)} placeholder="hash_..."/>
+            <button
+              className="action-btn action-btn--orange"
+              disabled={pending}
+              style={{ marginTop: 12, width: "100%" }}
+              onClick={() => runTx(
+                c => c.submitSellerData(dealId, sellerName, sellerPassport),
+                "✍️ Данные продавца отправлены. Оракул проверяет право собственности в реестре...",
+                "Ожидаем ответ оракула..."
+              )}
+            >
+              <span className="action-btn__num">1</span>
+              <span className="action-btn__text">
+                <strong>Подать данные продавца</strong>
+                <small>Оракул проверит владельца в реестре</small>
+              </span>
+            </button>
           </div>
         )}
 
