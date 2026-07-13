@@ -59,12 +59,12 @@ const MARKET_ABI = [
 const MOCK_REGISTRY = {
   // cadastralNumber → { ownerAddress (lowercase), ownerName }
   "77:01:0004012:1056": {
-    ownerAddress: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", // Hardhat #0
+    ownerAddress: "0x8Ba321cCB99c2d01C71A002B5D605646Ec18fE4C",
     ownerName: "Ivan Petrov",
     registryId: "REG-2026-000001",
   },
   "77:02:0001234:5678": {
-    ownerAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", // Hardhat #1
+    ownerAddress: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", 
     ownerName: "Anna Sidorova",
     registryId: "REG-2026-000002",
   },
