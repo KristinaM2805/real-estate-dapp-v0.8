@@ -271,20 +271,18 @@ export default function App() {
   }
 
   async function connectWallet() {
-    try {
-      const { c, address } = await getFresh();
-      setMessage("Кошелёк подключён!");
-
-      const found = await loadLastDealForAddress(c, address);
-      if (!found) {
-        setDeal(null);
-        setDealId(null);
-        setShowCreateForm(true);
-        setMessage("Кошелёк подключён. Сделок для этого аккаунта пока нет — можно создать новую или открыть сделку по ID.");
-      }
-    } catch (e) {
-      setMessage(e?.reason || e?.shortMessage || e?.message || "Ошибка");
-    }
+    if (ids.length > 0) {
+  const lastId = Number(ids[ids.length - 1]);
+  setDealId(lastId);
+  await loadDeal(c, lastId);
+  setMessage(`Загружена последняя сделка #${lastId}. Если она отменена, создайте новую сделку.`);
+  setShowCreateForm(true);
+} else {
+  setDeal(null);
+  setDealId(null);
+  setMessage("Активных сделок нет. Можно создать новую сделку.");
+  setShowCreateForm(true);
+}
   }
 
   const closeMm = useCallback(() => { clearTimeout(mmTimer.current); setMmStatus("idle"); }, []);
