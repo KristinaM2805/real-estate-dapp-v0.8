@@ -23,6 +23,12 @@ export default defineConfig({
       url: configVariable("SEPOLIA_RPC_URL"),
       accounts: [configVariable("PRIVATE_KEY")],
     },
+    docker: {
+      type: "http",
+      chainType: "l1",
+      url: "http://hardhat-node:8545",
+      chainId: 31337,
+    },
 
     hardhat: {
       type: "edr-simulated",
