@@ -6,15 +6,23 @@ export default defineConfig({
   plugins: [hardhatToolboxMochaEthers],
 
   solidity: {
-    version: "0.8.28",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
+  profiles: {
+    default: {
+      version: "0.8.28",
+      settings: {
+        optimizer: { enabled: true, runs: 200 },
+        viaIR: true,
       },
-      viaIR: true,
+    },
+    production: {
+      version: "0.8.28",
+      settings: {
+        optimizer: { enabled: true, runs: 200 },
+        viaIR: true,
+      },
     },
   },
+},
 
   networks: {
     sepolia: {

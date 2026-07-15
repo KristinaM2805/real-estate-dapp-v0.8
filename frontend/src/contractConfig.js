@@ -17,10 +17,12 @@ export const ORACLE_ABI = [
   "event VerificationRequest(uint256 indexed requestId, uint256 indexed dealId, address indexed dealContract, uint8 reqType, string cadastralNumber, string subjectAddress, string fullName)",
   "event RegistryTransferRequest(uint256 indexed requestId, uint256 indexed dealId, address indexed dealContract, string cadastralNumber, string sellerFullName, string buyerFullName, uint256 priceWei)",
   "event RequestFulfilled(uint256 indexed requestId, bool success)",
+
 ];
 
 // ─── RealEstateMarket ABI ────────────────────────────────────────────────────
 export const MARKET_ABI = [
+  "function createDealWithSellerData(string cadastralNumber, string apartmentAddress, string propertyDocumentHash, string registryRecordId, uint256 price, uint256 paymentTimeoutSeconds, string sellerFullName, string sellerPassportHash) returns (uint256)",
   {
     name: "createDeal",
     type: "function",

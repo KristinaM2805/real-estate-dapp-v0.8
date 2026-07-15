@@ -140,6 +140,7 @@ contract RealEstateMarket {
     event BuyerDataSubmitted(uint256 indexed dealId, address indexed buyer, uint256 oracleRequestId);
     event BuyerVerifiedOK(uint256 indexed dealId);
     event BuyerVerificationFailed(uint256 indexed dealId, string reason);
+    event BuyerLeft(uint256 indexed dealId, address indexed buyer, string reason);
 
     event PaymentReceived(uint256 indexed dealId, address indexed buyer, uint256 amount);
 
@@ -212,14 +213,14 @@ contract RealEstateMarket {
      * @param _price Цена в wei (должна быть > 0)
      * @param _paymentTimeoutSeconds Срок ожидания оплаты после верификации покупателя
      */
-    function createDeal(
+    function _createDealRecord(
         string calldata _cadastralNumber,
         string calldata _apartmentAddress,
         string calldata _propertyDocumentHash,
         string calldata _registryRecordId,
         uint256 _price,
         uint256 _paymentTimeoutSeconds
-    ) external returns (uint256 dealId) {
+    ) internal returns (uint256 dealId) {
         require(bytes(_cadastralNumber).length > 0, "Cadastral number is empty");
         require(bytes(_apartmentAddress).length > 0, "Apartment address is empty");
         require(bytes(_propertyDocumentHash).length > 0, "Document hash is empty");
@@ -242,8 +243,86 @@ contract RealEstateMarket {
 
         sellerDeals[msg.sender].push(dealId);
 
-        emit DealCreated(dealId, msg.sender, _price, _cadastralNumber);
+        _emitDealCreated(dealId);
+    }
+
+    function _emitDealCreated(uint256 dealId) internal {
+        Deal storage d = deals[dealId];
+        emit DealCreated(dealId, d.seller, d.price, d.cadastralNumber);
+    }
+
+    function createDeal(
+        string calldata _cadastralNumber,
+        string calldata _apartmentAddress,
+        string calldata _propertyDocumentHash,
+        string calldata _registryRecordId,
+        uint256 _price,
+        uint256 _paymentTimeoutSeconds
+    ) external returns (uint256 dealId) {
+        dealId = _createDealRecord(
+            _cadastralNumber,
+            _apartmentAddress,
+            _propertyDocumentHash,
+            _registryRecordId,
+            _price,
+            _paymentTimeoutSeconds
+        );
+
         _emitStage(dealId, unicode"Сделка создана. Ожидание данных продавца.");
+    }
+
+    /**
+     * @notice Создание сделки вместе с данными продавца.
+     *         Для пользователя это один шаг: продавец вводит параметры объекта и свои данные,
+     *         после чего контракт сразу отправляет запрос Oracle на проверку права собственности.
+     *         До успешной проверки Oracle такая сделка не попадает в список активных для покупателей.
+     */
+    function createDealWithSellerData(
+        string calldata _cadastralNumber,
+        string calldata _apartmentAddress,
+        string calldata _propertyDocumentHash,
+        string calldata _registryRecordId,
+        uint256 _price,
+        uint256 _paymentTimeoutSeconds,
+        string calldata _sellerFullName,
+        string calldata _sellerPassportHash
+    ) external returns (uint256 dealId) {
+        require(bytes(_sellerFullName).length > 0, "Seller name is empty");
+        require(bytes(_sellerPassportHash).length > 0, "Seller passport hash is empty");
+
+        dealId = _createDealRecord(
+            _cadastralNumber,
+            _apartmentAddress,
+            _propertyDocumentHash,
+            _registryRecordId,
+            _price,
+            _paymentTimeoutSeconds
+        );
+
+        _submitSellerDataAfterCreate(dealId, _sellerFullName, _sellerPassportHash);
+    }
+
+    function _submitSellerDataAfterCreate(
+        uint256 dealId,
+        string calldata _sellerFullName,
+        string calldata _sellerPassportHash
+    ) internal {
+        Deal storage d = deals[dealId];
+        d.stage = DealStage.SellerSubmitted;
+        d.sellerFullName = _sellerFullName;
+        d.sellerPassportHash = _sellerPassportHash;
+        d.sellerSubmittedAt = block.timestamp;
+
+        uint256 reqId = oracle.requestSellerVerification(
+            dealId,
+            d.cadastralNumber,
+            _addressToString(d.seller),
+            _sellerFullName
+        );
+        d.pendingOracleRequestId = reqId;
+
+        emit SellerDataSubmitted(dealId, reqId);
+        _emitStage(dealId, unicode"Сделка создана, данные продавца отправлены. Oracle проверяет право собственности...");
     }
 
     // ─── Step 2: Seller submits personal data → oracle verifies ownership ────
@@ -452,8 +531,8 @@ contract RealEstateMarket {
     // ─── Cancellation paths ───────────────────────────────────────────────────
 
     /**
-     * @notice Продавец может отменить сделку до этапа RegistryPending.
-     *         Если деньги уже в escrow — возвращаются покупателю.
+     * @notice Продавец может снять сделку с публикации только до подключения покупателя.
+     *         После назначения покупателя продавец уже не может отменить сделку в одностороннем порядке.
      */
     function cancelDeal(
         uint256 dealId,
@@ -461,33 +540,45 @@ contract RealEstateMarket {
     ) external onlySeller(dealId) nonReentrant {
         Deal storage d = deals[dealId];
         require(
-            d.stage != DealStage.RegistryPending &&
-            d.stage != DealStage.Completed &&
-            d.stage != DealStage.Cancelled,
-            "Cannot cancel at this stage"
+            d.stage == DealStage.Created ||
+            d.stage == DealStage.SellerSubmitted ||
+            d.stage == DealStage.SellerVerified,
+            "Seller cannot cancel at this stage"
         );
-
-        uint256 refundAmount = 0;
-        if (d.stage == DealStage.PaymentReceived) {
-            refundAmount = address(this).balance;
-        }
+        require(d.buyer == address(0), "Buyer already joined");
 
         d.stage = DealStage.Cancelled;
         d.cancelledAt = block.timestamp;
 
         emit DealCancelled(dealId, reason);
-        _emitStage(dealId, unicode"Сделка отменена продавцом.");
-
-        if (refundAmount > 0 && d.buyer != address(0)) {
-            (bool sent, ) = payable(d.buyer).call{value: refundAmount}("");
-            require(sent, "Refund failed");
-            emit FundsRefunded(dealId, d.buyer, refundAmount);
-        }
+        _emitStage(dealId, unicode"Сделка снята продавцом с публикации.");
     }
 
     /**
-     * @notice Покупатель может отменить до RegistryPending.
-     *         Деньги возвращаются.
+     * @notice Покупатель может выйти из сделки только до внесения оплаты в escrow.
+     *         Сделка не отменяется, а возвращается в SellerVerified и снова доступна новым покупателям.
+     */
+    function leaveDealAsBuyer(
+        uint256 dealId,
+        string calldata reason
+    ) external onlyBuyer(dealId) nonReentrant {
+        Deal storage d = deals[dealId];
+        require(
+            d.stage == DealStage.BuyerSubmitted ||
+            d.stage == DealStage.BuyerVerified,
+            "Buyer cannot leave at this stage"
+        );
+
+        address oldBuyer = d.buyer;
+        _clearBuyerAndReopen(d);
+
+        emit BuyerLeft(dealId, oldBuyer, reason);
+        _emitStage(dealId, unicode"Покупатель вышел из сделки. Ожидание другого покупателя.");
+    }
+
+    /**
+     * @notice Backward-compatible alias для старого frontend.
+     *         Теперь не отменяет всю сделку, а выполняет выход покупателя до оплаты.
      */
     function cancelDealAsBuyer(
         uint256 dealId,
@@ -495,27 +586,16 @@ contract RealEstateMarket {
     ) external onlyBuyer(dealId) nonReentrant {
         Deal storage d = deals[dealId];
         require(
-            d.stage == DealStage.BuyerVerified ||
-            d.stage == DealStage.PaymentReceived,
-            "Cannot cancel at this stage"
+            d.stage == DealStage.BuyerSubmitted ||
+            d.stage == DealStage.BuyerVerified,
+            "Buyer cannot leave at this stage"
         );
 
-        uint256 refundAmount = 0;
-        if (d.stage == DealStage.PaymentReceived) {
-            refundAmount = address(this).balance;
-        }
+        address oldBuyer = d.buyer;
+        _clearBuyerAndReopen(d);
 
-        d.stage = DealStage.Cancelled;
-        d.cancelledAt = block.timestamp;
-
-        emit DealCancelled(dealId, reason);
-        _emitStage(dealId, unicode"Сделка отменена покупателем.");
-
-        if (refundAmount > 0) {
-            (bool sent, ) = payable(d.buyer).call{value: refundAmount}("");
-            require(sent, "Refund failed");
-            emit FundsRefunded(dealId, d.buyer, refundAmount);
-        }
+        emit BuyerLeft(dealId, oldBuyer, reason);
+        _emitStage(dealId, unicode"Покупатель вышел из сделки. Ожидание другого покупателя.");
     }
 
     /**
@@ -621,6 +701,18 @@ contract RealEstateMarket {
     }
 
     // ─── Internals ────────────────────────────────────────────────────────────
+
+    function _clearBuyerAndReopen(Deal storage d) internal {
+        d.stage = DealStage.SellerVerified;
+        d.buyer = address(0);
+        d.buyerFullName = "";
+        d.buyerPassportHash = "";
+        d.buyerSubmittedAt = 0;
+        d.buyerVerifiedAt = 0;
+        d.paymentDeadline = 0;
+        d.pendingOracleRequestId = 0;
+        d.lastOracleError = "";
+    }
 
     function _emitStage(uint256 dealId, string memory text) internal {
         emit StageChanged(dealId, uint8(deals[dealId].stage), text);
